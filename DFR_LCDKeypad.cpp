@@ -1,74 +1,65 @@
 #include "DFR_LCDKeypad.h"
-
 /*
  * File: DFR_LCDKeypad.cpp
  * Hardware: DFRobot LCD Keypad Shield for Arduino
  * Author: Paul R. Nelson III
- * Version: 0.5
- * License: BSD 2-Clause (Simplified BSD)
+ * Version: 1.0
+ * License: BSD 2-clause
  * Description:  Library for easy interaction with 'DFRobot LCD Keypad Shield V1.0'
  *   This library works conjunction with the LiquidCrystal library, and adds DFRobot 
- *   specific features, such as backlight control on pin 10.  Readability and functionality
- *   where higher concerns than absolute minimal byte count.  To library size further,
- *   eliminate the setCalibration() function.  Further cutes could be made by removing the 
- *   isKey() function and _calibration[] array, and putting the comparisons directly into
- *   the update function.
+ *   specific features, such as backlight control on pin 10.  Readability, functionality
+ *   and byte count are all concerns.
  *   Features - buttonUp, buttonDown, buttonHeld callbacks
- *            - setBacklight(byte brightness) function
- *            - setable calibration array for analog button values
+ *            - setBrightness(byte brightness) function
  */
-
-DFR_LCDKeypad::DFR_LCDKeypad()
-		: _buttonDown(0), _buttonUp(0), _buttonHeld(0), _buttonState(eNone), 
-		  _heldInterval(cDefaultHeldInterval), _prevMs(0)
+DFR_LCDKeypad::DFR_LCDKeypad(byte brightness)
+		: _buttonDown(0), _buttonUp(0), _buttonHeld(0), _prevMs(0),
+		  _buttonState(eNone), _heldInterval(cDefaultHeldInterval),
+		  _brightness(brightness)
 {
-	// array ordered eNone, eUp, eDown, eLeft, eRight, eSelect
-	int analogReadValues[6] = { 1023, 144, 329, 505, 0, 742 };
-	setCalibration ( analogReadValues );
+	// initialize backlight default to full brightness, if no parameter
 	pinMode(cBacklightPin, OUTPUT);
-	analogWrite(cBacklightPin, 255);
+	analogWrite(cBacklightPin, _brightness);
 }
 
-// your device may differ from mine, can set the calibration constants
-// using memcpy instead of individual assignment actually cost 62 bytes
-void 
-DFR_LCDKeypad::setCalibration(int *array) 
-{
-	_calibration[eNone]   = array[eNone];
-	_calibration[eUp]     = array[eUp];
-	_calibration[eDown]   = array[eDown];
-	_calibration[eLeft]   = array[eLeft];
-	_calibration[eRight]  = array[eRight];
-	_calibration[eSelect] = array[eSelect];
-}
-
-// Called from within loop() and it will dispatch calls to button handler callbacks
-// if the calling program has set the values in the class when the state changes, or
-// button down exceeds the held interval.
-// May need some key debounce, but I did not see the need on mine, I think the A/D 
-// conversion probably soaks up the transients.
+// Called from within loop() to update button state and dispatch calls to button handler 
+// callbacks as necessary.   Conditions checked for are button down, button up and button held
+// longer than setable interval.  I believe debounce code is unnecessary because
+// the A/D conversion appears to be soaking up any transients.  
+// (not entirely true, seeing some bounce if rapidly pressing button like a frantic monkey.)
+// Typical use case seemes to be fine.
+// 
+// _buttonUp() resets _heldInterval to cDefaultHeldInterval. - my usage, saves doing it in
+// each client's buttonUp routine(s) using a function call.
+// 
+// Note: the magic occuring in the first line turns an analog value to a key enumeration,
+//   using a degree=1 least squares fit of the midpoint values between the analog key values.
+//   this allows creating a reverse mapping of value to key without using a series of 
+//   if/then/else statements.  The code squeezes and additional 70 bytes out of the 
+//   equivalent if/then/else code at the cost of code clarity.  
+//   For full discussion, see ReadMe.txt
 void
 DFR_LCDKeypad::update() 
-{
-	int value = analogRead(cKeyPin);
-	eDFRKey keyRead = eNone;
-	if (      isKey(eUp,     value) ) keyRead = eUp;
-	else if ( isKey(eDown,   value) ) keyRead = eDown;
-	else if ( isKey(eLeft,   value) ) keyRead = eLeft;
-	else if ( isKey(eRight,  value) ) keyRead = eRight;
-	else if ( isKey(eSelect, value) ) keyRead = eSelect;
-	
+{	
+	int kv = ((analogRead(cKeyPin) + 71) * 6) >> 10;   // MAGIC NUMBERS see ReadMe.txt
+	eDFRKey keyRead = (kv < eNone) ? eDFRKey(kv) : eNone;
+
     // if button state differs from previous state, call appropriate callback function
 	if( keyRead != _buttonState) {
+		// accept the extra overhead of a temporary for previous state so that 
+		// client code can safely call getState() and have current button status.
 		eDFRKey prevKey = _buttonState;
 		_buttonState = keyRead;
 		if( prevKey == eNone ) {
 			if(_buttonDown)
 				(*_buttonDown)(keyRead);	// call button down callback
 		} else {
-			if(_buttonUp)
+			if(_buttonUp) {
+				_heldInterval = cDefaultHeldInterval;
 				(*_buttonUp)(prevKey);		// call button up callback
+			}
 		}
+
 	} else {
 		if(_buttonState != eNone && _buttonHeld) {
 			// button held down - check update interval
@@ -78,8 +69,8 @@ DFR_LCDKeypad::update()
 				(*_buttonHeld)(keyRead);	// call button held callback
 			}
 		}
+		return;
 	}
-	
 }
 
 

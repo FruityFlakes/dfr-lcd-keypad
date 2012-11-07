@@ -3,9 +3,9 @@
 /*
  * File: LCDKeyDemo.ino
  * Hardware: DFRobot LCD Keypad Shield for Arduino
- * Author: Paul R. Nelson III, prniii at gmail dot com
- * Version: 0.5
- * License: BSD 2-Clause (Simplified BSD)
+ * Author: Paul R. Nelson III
+ * Version: 1.0
+ * License:  BSD 2-clause
  * Descritpion:  Full-on demo of of 'DFRobot LCD Keypad Shield V1.0'
  *   Features - user defined display characters
  *            - blink
@@ -38,15 +38,16 @@
  * 255 full box
  */
 
+const byte cBrightness(128);
 //Pin assignments for DFRobot LCD Keypad Shield
 LiquidCrystal lcd(8, 9, 4, 5, 6, 7);
-DFR_LCDKeypad keypad;
+DFR_LCDKeypad keypad(cBrightness);
 byte displayChar(0);
-byte brightness(255);
+byte brightness(cBrightness);
 
-unsigned long prevTick = 0;
-unsigned int keyInterval = 700;
-bool isSolid = true;
+unsigned long prevTick(0);
+unsigned int keyInterval(700);
+bool isSolid(true);
 
 
 byte smiley[8] = {
@@ -125,23 +126,52 @@ byte Stop[8] = {
    B00000
   }; 
        
-static int sHeldCount=0;
+static int sHeldCount(0);
 static byte xPos(0);
 static byte yPos(0);
 static bool isMouseMode(false);
 void mouseBtnUp(eDFRKey);
 
+// Character display is occuring once in setup, then only again in the button routines
+// no need to refresh in update loop unless there is a change.  For now just redisplay all 
+// text instead of additional logic to update only chagned value and display character.
+// it is by far fast enough.
+void charDisplay() 
+{
+    // display characters mode
+    lcd.setCursor(0, 0);
+    lcd.print("Display Char: ");
+    lcd.setCursor(14,0);
+    lcd.write(displayChar);
+      
+    lcd.setCursor(0,1);
+    lcd.print("Value: ");
+    lcd.print(displayChar);
+    lcd.print("  ");  // make sure to cleanup after numerical wrap around
+ }
+
+void cursorDraw() 
+{
+//  lcd.write(254);
+  prevTick = millis();
+  isSolid = true;
+  lcd.setCursor(xPos,yPos);
+  lcd.write(255);
+}
+
 void buttonUp(eDFRKey key) 
 {
+  sHeldCount = 0;
+
   switch(key) {
     case eUp:
       if(brightness < 255) 
-        keypad.setBacklight(++brightness);
+        keypad.setBrightness(++brightness);
       break;
       
     case eDown:
       if(brightness > 0) 
-        keypad.setBacklight(--brightness);
+        keypad.setBrightness(--brightness);
       break;
       
     case eLeft:
@@ -154,14 +184,14 @@ void buttonUp(eDFRKey key)
       
     case eSelect:
       // switch to mouse mode
-      lcd.clear();
       isMouseMode = true;
+      lcd.clear();
+      cursorDraw();
       keypad.setButtonUpHandler(mouseBtnUp);
       keypad.setButtonHeldHandler(0);
-      break;
+      return;
   }
-  sHeldCount = 0;
-  keypad.setHeldInterval(cDefaultHeldInterval);
+  charDisplay();
 }
 
 /*
@@ -199,12 +229,12 @@ void buttonHeld(eDFRKey key) {
     switch(key) {
       case eUp:
         if(brightness < 255)
-          keypad.setBacklight(++brightness);
+          keypad.setBrightness(++brightness);
         break;
       
       case eDown:
         if(brightness > 0)
-          keypad.setBacklight(--brightness);
+          keypad.setBrightness(--brightness);
         break;
       
       case eLeft:
@@ -225,8 +255,10 @@ void buttonHeld(eDFRKey key) {
   } else if(sHeldCount > 10) {
     keypad.setHeldInterval(100);
   }
+  charDisplay();
 }
 
+// clamps to edges of display, rather than wrap
 void mouseBtnUp(eDFRKey key) 
 {
   lcd.clear();    // fewer bytes than lcd.setCursor(,); lcd.write()
@@ -234,11 +266,8 @@ void mouseBtnUp(eDFRKey key)
   switch(key) {
 
     case eUp:
-      if(yPos == 1) yPos--;      
-      break;
-      
     case eDown:
-      if(yPos == 0) yPos++;
+      yPos = (yPos) ? 0 : 1;   // display is only 2 lines tall
       break;
       
     case eLeft:
@@ -251,24 +280,17 @@ void mouseBtnUp(eDFRKey key)
       
     case eSelect:
       // switch back to display mode
-      lcd.clear();
+      charDisplay();
       isMouseMode = false;
       keypad.setButtonUpHandler(buttonUp);
       keypad.setButtonHeldHandler(buttonHeld);
       return;
   }
-  
-  prevTick = millis();
-  isSolid = true;
-  lcd.setCursor(xPos,yPos);
-  lcd.write(255);
+  cursorDraw(); 
 }
-
 
 void setup() 
 {
-  brightness=128;
-  
   lcd.begin(16, 2);
   lcd.clear();
   lcd.setCursor(0, 0);
@@ -276,7 +298,6 @@ void setup()
   keypad.setButtonUpHandler(buttonUp);
 //  keypad.setButtonDownHandler(buttonDown);
   keypad.setButtonHeldHandler(buttonHeld);
-  keypad.setBacklight(brightness);
    
   lcd.createChar(0, smiley);
   lcd.createChar(1, fwd);
@@ -286,46 +307,26 @@ void setup()
   lcd.createChar(5, ch_fwd);
   lcd.createChar(6, ch_rev);
 //  lcd.createChar(7, );
-//  lcd.createChar(8, );
   delay(2500);
   
   lcd.clear();
+  charDisplay();
 }
-
 
 void loop() 
 {
   // updates current key press value and calls button callbacks if necessary  
   keypad.update();
   
-  bool updateOK = false;
   unsigned long current = millis();
   
   if(isMouseMode) {  
     // blink full display element at key interval  
     if(current - prevTick > keyInterval) {
       prevTick = current;
-      //updateOK = true;
-      if(isSolid) {
-        isSolid = false;
-        lcd.setCursor(xPos,yPos);
-        lcd.write(254);
-      } else {
-        isSolid = true;
-        lcd.setCursor(xPos,yPos);
-        lcd.write(255);
-      }
+      lcd.setCursor(xPos,yPos);
+      isSolid = !isSolid;
+      lcd.write( isSolid ? 255 : 254 );
     }
-  } else {
-    // display characters mode
-    lcd.setCursor(0, 0);
-    lcd.print("Display Char: ");
-    lcd.setCursor(14,0);
-    lcd.write(displayChar);
-      
-    lcd.setCursor(0,1);
-    lcd.print("Value: ");
-    lcd.print(displayChar);
-    lcd.print("  ");  // make sure to cleanup after wrap
-  }
+  } 
 }
